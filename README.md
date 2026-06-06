@@ -146,6 +146,8 @@ Input string  →  Tokenizer  →  Parser  →  AST
 
 Right-associativity of `^` means `2 ^ 3 ^ 2` parses as `2 ^ (3 ^ 2)` = 512, not `(2 ^ 3) ^ 2` = 64.
 
+> `log` is the **base-10 logarithm** (common log, log₁₀). `log(10) = 1`, `log(100) = 2`. It is **not** the natural logarithm (ln).
+
 ---
 
 ## Supported Expressions
