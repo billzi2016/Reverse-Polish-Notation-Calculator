@@ -14,7 +14,7 @@ Standard math writes operators *between* operands — this is called **infix** n
 sin(3 + 4) * 2
 ```
 
-**Reverse Polish Notation** places operators *after* their operands — no parentheses needed, because the order of operands already encodes structure:
+**Reverse Polish Notation (RPN)**, also called **postfix** notation, places operators *after* their operands. No parentheses are needed because the position of operands already encodes the evaluation structure:
 
 ```
 3 4 +
@@ -22,24 +22,96 @@ sin(3 + 4) * 2
 3 4 + sin 2 *
 ```
 
-A simple stack machine can evaluate any RPN expression in one linear pass:
+RPN was introduced by Australian philosopher **Charles Hamblin** in 1957, building on the work of Polish logician **Jan Łukasiewicz**, who invented prefix (Polish) notation in the 1920s. The name "Reverse Polish" reflects that operators come *after* operands, the reverse of Łukasiewicz's scheme.
+
+---
+
+## Two Core Algorithms
+
+This calculator is powered by two classic algorithms, both rooted in Dijkstra's work.
+
+### Algorithm 1 — Dijkstra's Shunting-yard
+
+Invented by **Edsger W. Dijkstra** in 1961, the Shunting-yard algorithm converts an infix expression to RPN (or an AST) in a single left-to-right pass using an **operator stack** and an **output queue**.
+
+```
+Input:  3 + 4 * 2
+```
+
+| Token | Action | Operator Stack | Output Queue |
+|-------|--------|----------------|--------------|
+| `3` | number → output | `[]` | `[3]` |
+| `+` | push (prec 1) | `[+]` | `[3]` |
+| `4` | number → output | `[+]` | `[3, 4]` |
+| `*` | prec(*)=2 > prec(+)=1, push | `[+, *]` | `[3, 4]` |
+| `2` | number → output | `[+, *]` | `[3, 4, 2]` |
+| end | pop remaining | `[]` | `[3, 4, 2, *, +]` |
+
+Result RPN: **`3 4 2 * +`** = 3 + (4 × 2) = **11** ✓
+
+**The key rule:** before pushing an operator `o1`, pop all operators `o2` from the stack where:
+- `prec(o2) > prec(o1)`, **or**
+- `prec(o2) == prec(o1)` and `o1` is **left-associative**
+
+This naturally handles precedence and associativity without any look-ahead.
+
+For the right-associative `^`, the rule is reversed — equal precedence does **not** trigger a pop:
+
+```
+Input:  2 ^ 3 ^ 2
+```
+
+| Token | Action | Stack | Output |
+|-------|--------|-------|--------|
+| `2` | output | `[]` | `[2]` |
+| `^` | push | `[^]` | `[2]` |
+| `3` | output | `[^]` | `[2, 3]` |
+| `^` | prec equal but right-assoc → push | `[^, ^]` | `[2, 3]` |
+| `2` | output | `[^, ^]` | `[2, 3, 2]` |
+| end | pop both | `[]` | `[2, 3, 2, ^, ^]` |
+
+Result: **`2 3 2 ^ ^`** = 2^(3^2) = 2^9 = **512** ✓
+
+> **This project** uses a **Pratt parser** (recursive descent with precedence climbing) to build an AST directly, then derives RPN via post-order traversal. Pratt parsing and Shunting-yard are equivalent in power — they both encode the same precedence and associativity rules; Pratt operates top-down on the call stack while Shunting-yard operates bottom-up on an explicit stack.
+
+---
+
+### Algorithm 2 — Stack-based RPN Evaluation
+
+Once an expression is in RPN form, evaluation is a single linear pass with a stack:
 
 1. Read tokens left to right
-2. Push numbers onto the stack
-3. When an operator appears, pop its operands, apply it, push the result
+2. **Number** → push onto stack
+3. **Operator / function** → pop operands, compute, push result
 
-For `3 4 + 2 *`:
+For `3 4 2 * +`:
 
 ```
 token  stack
 3      [3]
 4      [3, 4]
-+      [7]        ← pop 3,4 → push 3+4
-2      [7, 2]
-*      [14]       ← pop 7,2 → push 7*2
+2      [3, 4, 2]
+*      [3, 8]      ← pop 4, 2 → push 4*2
++      [11]        ← pop 3, 8 → push 3+8
 ```
 
-Result: **14**
+Result: **11**
+
+For `3 4 + sin 2 *`:
+
+```
+token  stack
+3      [3]
+4      [3, 4]
++      [7]         ← pop 3, 4 → push 7
+sin    [0.6570]    ← pop 7 → push sin(7)
+2      [0.6570, 2]
+*      [1.3140]    ← pop 0.6570, 2 → push result
+```
+
+Result: **1.3140**
+
+No parentheses, no precedence rules needed — the stack handles everything automatically. This is why RPN was widely used in early calculators and stack-based virtual machines (Forth, JVM, CPython bytecode).
 
 ---
 
@@ -90,6 +162,18 @@ Right-associativity of `^` means `2 ^ 3 ^ 2` parses as `2 ^ (3 ^ 2)` = 512, not 
 | `log(100) + 2` | `100 log 2 +` | `4` |
 | `sin(3 + 4) * 2` | `3 4 + sin 2 *` | `1.31397` |
 | `(2 + 3) * (4 - 1) ^ 2` | `2 3 + 4 1 - 2 ^ *` | `45` |
+
+### Complex Nested Expressions
+
+| Expression | RPN | Result |
+|-----------|-----|--------|
+| `sin(cos(1) + 2) * log(100)` | `1 cos 2 + sin 100 log *` | `1.13141` |
+| `(sin(1) + cos(1)) ^ 2 + tan(1) * log(10)` | `1 sin 1 cos + 2 ^ 1 tan 10 log * +` | `3.46671` |
+| `log(sin(1) * 10 + cos(1) * 10)` | `1 sin 10 * 1 cos 10 * + log` | `1.14044` |
+| `sin(1 + cos(1)) * (log(100) + tan(1))` | `1 1 cos + sin 100 log 1 tan + *` | `3.55575` |
+| `(sin(1) * cos(1) + log(10)) ^ 2` | `1 sin 1 cos * 10 log + 2 ^` | `2.11600` |
+| `cos(sin(1) + tan(1)) * log(100) + sin(1) ^ 2` | `1 sin 1 tan + cos 100 log * 1 sin 2 ^ +` | `-0.76520` |
+| `log(100) * (sin(1) + cos(1)) - tan(1) ^ 2` | `100 log 1 sin 1 cos + * 1 tan 2 ^ -` | `0.33803` |
 
 ---
 
