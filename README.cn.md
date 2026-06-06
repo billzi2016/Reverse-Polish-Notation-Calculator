@@ -1,0 +1,261 @@
+# 逆波兰科学计算器
+
+将中缀表达式转换为**逆波兰表达式（RPN）**，并将底层**抽象语法树（AST）**渲染为带标注的 JPG 图像。
+
+---
+
+## 什么是逆波兰表达式？
+
+普通数学将运算符写在两个操作数**之间**，称为**中缀**表达式：
+
+```
+3 + 4
+(3 + 4) * 2
+sin(3 + 4) * 2
+```
+
+**逆波兰表达式**将运算符放在操作数**之后**——不需要括号，因为操作数的顺序已经完整编码了运算结构：
+
+```
+3 4 +
+3 4 + 2 *
+3 4 + sin 2 *
+```
+
+一台简单的栈机器可以一趟线性扫描求值任意 RPN 表达式：
+
+1. 从左到右读取 token
+2. 遇到数字，压栈
+3. 遇到运算符，弹出对应数量的操作数，计算后将结果压回栈
+
+以 `3 4 + 2 *` 为例：
+
+```
+token  栈
+3      [3]
+4      [3, 4]
++      [7]        ← 弹出 3, 4 → 压入 3+4
+2      [7, 2]
+*      [14]       ← 弹出 7, 2 → 压入 7*2
+```
+
+结果：**14**
+
+---
+
+## 工作原理
+
+```
+输入字符串 → 词法分析器 → 语法分析器 → AST
+                                         │
+                           ┌─────────────┤
+                           │             │
+                      RPN 转换器      求值器
+                           │
+                        可视化器 → JPG
+```
+
+| 阶段 | 输入 | 输出 |
+|------|------|------|
+| **词法分析器** | `"sin(3 + 4) * 2"` | `[FUNC:sin, LPAREN, NUM:3, OP:+, NUM:4, RPAREN, OP:*, NUM:2]` |
+| **语法分析器** | token 列表 | AST（节点树） |
+| **RPN 转换器** | AST 根节点 | `"3 4 + sin 2 *"` |
+| **求值器** | RPN 字符串 | `1.31397` |
+| **可视化器** | AST + 标签 | `.jpg` 图像 |
+
+### 运算符优先级（定义于 `src/core/operators.py`）
+
+| 符号 | 类型 | 优先级 | 结合性 |
+|------|------|--------|--------|
+| `+` `-` | 二元运算符 | 1 | 左结合 |
+| `*` `/` | 二元运算符 | 2 | 左结合 |
+| `^` | 二元运算符 | 3 | **右结合** |
+| `sin` `cos` `tan` `log` | 一元函数 | 4（最高） | — |
+
+`^` 的右结合性意味着 `2 ^ 3 ^ 2` 被解析为 `2 ^ (3 ^ 2)` = 512，而非 `(2 ^ 3) ^ 2` = 64。
+
+---
+
+## 支持的表达式
+
+| 中缀表达式 | RPN | 结果 |
+|-----------|-----|------|
+| `3 + 4` | `3 4 +` | `7` |
+| `(3 + 4) * 2` | `3 4 + 2 *` | `14` |
+| `2 ^ 3` | `2 3 ^` | `8` |
+| `2 ^ 3 ^ 2` | `2 3 2 ^ ^` | `512` |
+| `sin(0)` | `0 sin` | `0` |
+| `cos(0)` | `0 cos` | `1` |
+| `log(100)` | `100 log` | `2` |
+| `log(100) + 2` | `100 log 2 +` | `4` |
+| `sin(3 + 4) * 2` | `3 4 + sin 2 *` | `1.31397` |
+| `(2 + 3) * (4 - 1) ^ 2` | `2 3 + 4 1 - 2 ^ *` | `45` |
+
+---
+
+## AST 可视化
+
+每次计算都会在 `output/trees/` 目录生成一张 `.jpg` 图像。
+
+图像包含三行标题：
+
+```
+sin(3 + 4) * 2          ← 原始中缀表达式
+RPN:    3 4 + sin 2 *   ← 逆波兰表达式
+Result: 1.31397         ← 计算结果
+──────────────────────────────
+         [AST 树形图]
+```
+
+- **橙色圆角矩形** — 运算符与函数（内部节点）
+- **蓝色圆形** — 数字（叶子节点）
+- **箭头** — 从父节点指向子节点
+
+### 示例：`sin(3 + 4) * 2`
+
+```
+           *
+          / \
+        sin   2
+         |
+         +
+        / \
+       3   4
+```
+
+树结构编码了运算顺序：要计算 `*`，需要先算 `sin`；要算 `sin`，需要先算 `+`；`+` 需要 `3` 和 `4`。对该树做后序遍历，直接得到 RPN 字符串。
+
+---
+
+## 安装
+
+```bash
+git clone https://github.com/<you>/Reverse-Polish-Notation-Calculator.git
+cd Reverse-Polish-Notation-Calculator
+pip install -r requirements.txt
+```
+
+---
+
+## 使用方法
+
+### 交互式 REPL
+
+```bash
+python -m src.ui.calculator
+```
+
+```
+RPN Scientific Calculator  (type 'quit' to exit)
+Supported: + - * / ^ sin cos tan log and parentheses
+
+>> sin(3 + 4) * 2
+
+  Expression : sin(3 + 4) * 2
+  RPN        : 3 4 + sin 2 *
+  Result     : 1.3139731974375781
+  AST image  : output/trees/sin(3_+_4)_*_2.jpg
+
+>> (2 + 3) * (4 - 1) ^ 2
+
+  Expression : (2 + 3) * (4 - 1) ^ 2
+  RPN        : 2 3 + 4 1 - 2 ^ *
+  Result     : 45.0
+  AST image  : output/trees/(2_+_3)_*_(4_-_1)_^_2.jpg
+
+>> quit
+```
+
+### 单条表达式
+
+```bash
+python -m src.ui.calculator "log(100) + 2"
+```
+
+```
+  Expression : log(100) + 2
+  RPN        : 100 log 2 +
+  Result     : 4.0
+  AST image  : output/trees/log(100)_+_2.jpg
+```
+
+### Python API
+
+```python
+from src.ui.calculator import calculate
+
+result = calculate("(2 + 3) * (4 - 1) ^ 2")
+print(result["rpn"])        # 2 3 + 4 1 - 2 ^ *
+print(result["result"])     # 45.0
+print(result["image_path"]) # output/trees/(2_+_3)_*_(4_-_1)_^_2.jpg
+```
+
+也可以单独调用各个阶段：
+
+```python
+from src.core.parser        import parse
+from src.core.rpn_converter import ast_to_rpn
+from src.core.evaluator     import evaluate_rpn
+from src.ast_tree.visualizer import render_ast
+
+ast    = parse("2 ^ 3 ^ 2")
+rpn    = ast_to_rpn(ast)          # "2 3 2 ^ ^"
+result = evaluate_rpn(rpn)        # 512.0
+render_ast(ast, "2 ^ 3 ^ 2", rpn, "output/trees/power.jpg", result=result)
+```
+
+---
+
+## 运行测试
+
+```bash
+# 运行全套测试并输出覆盖率报告
+python -m pytest tests/ -v
+
+# 单个模块
+python -m pytest tests/test_rpn_converter.py -v
+```
+
+共 107 个测试，覆盖词法分析器、语法分析器、RPN 转换器、求值器和可视化器全部模块。
+
+---
+
+## 项目结构
+
+```
+src/
+├── core/
+│   ├── operators.py       ← 唯一权威来源：优先级与结合性定义
+│   ├── tokenizer.py       ← 字符串 → token 列表
+│   ├── parser.py          ← token 列表 → AST（Pratt 递归下降）
+│   ├── rpn_converter.py   ← AST → RPN 字符串（后序遍历）
+│   └── evaluator.py       ← RPN 字符串 → 浮点数（栈机求值）
+├── ast_tree/
+│   ├── nodes.py           ← NumberNode / OperatorNode / FunctionNode
+│   └── visualizer.py      ← AST → JPG（matplotlib）
+└── ui/
+    └── calculator.py      ← CLI 入口
+
+tests/
+├── test_operators.py
+├── test_tokenizer.py
+├── test_parser.py
+├── test_rpn_converter.py
+├── test_evaluator.py
+└── test_visualizer.py
+
+output/
+└── trees/                 ← 生成的 JPG 图像（每条表达式一张）
+```
+
+---
+
+## 错误处理
+
+| 输入 | 错误 |
+|------|------|
+| `3 @ 4` | `ValueError: Unexpected character '@'` |
+| `exp(1)` | `ValueError: Unknown function 'exp'` |
+| `(3 + 4` | `ValueError: Expected RPAREN` |
+| `5 / 0` | `ZeroDivisionError: Division by zero` |
+| `3 +` | `ValueError: Malformed RPN` |
